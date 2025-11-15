@@ -1,0 +1,70 @@
+{
+  "name": "ym7-hobby-backend",
+  "version": "1.0.0",
+  "description": "YM7 Hobby - Classic Yahoo Messenger revival with modern security and real-time messaging",
+  "main": "app.js",
+  "scripts": {
+    "start": "node app.js",
+    "dev": "nodemon app.js",
+    "test": "jest --verbose",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "setup-db": "node scripts/setup-database.js",
+    "migrate": "node scripts/migrate-database.js",
+    "cleanup": "node scripts/cleanup-expired.js",
+    "production": "NODE_ENV=production node app.js",
+    "pm2:start": "pm2 start ecosystem.config.js",
+    "pm2:stop": "pm2 stop ecosystem.config.js",
+    "pm2:restart": "pm2 restart ecosystem.config.js",
+    "pm2:logs": "pm2 logs ym7-hobby"
+  },
+  "keywords": [
+    "yahoo",
+    "messenger",
+    "realtime",
+    "chat",
+    "websocket",
+    "nostalgia"
+  ],
+  "author": "Ishant Singh",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "ws": "^8.14.2",
+    "pg": "^8.11.3",
+    "bcryptjs": "^2.4.3",
+    "jsonwebtoken": "^9.0.2",
+    "helmet": "^7.1.0",
+    "cors": "^2.8.5",
+    "express-rate-limit": "^7.1.5",
+    "express-slow-down": "^1.6.1",
+    "express-validator": "^7.0.1",
+    "nodemailer": "^6.9.7",
+    "dotenv": "^16.3.1",
+    "uuid": "^9.0.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.1",
+    "jest": "^29.6.2",
+    "supertest": "^6.3.3",
+    "eslint": "^8.47.0",
+    "eslint-config-standard": "^17.1.0",
+    "eslint-plugin-import": "^2.28.1",
+    "eslint-plugin-n": "^16.0.1",
+    "eslint-plugin-promise": "^6.1.1"
+  },
+  "engines": {
+    "node": ">=16.0.0",
+    "npm": ">=8.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ishantsingh665/ym-hobby"
+  },
+  "bugs": {
+    "url": "https://github.com/ishantsingh665/ym-hobby/issues"
+  },
+  "homepage": "https://github.com/ishantsingh665/ym-hobby#readme"
+}
