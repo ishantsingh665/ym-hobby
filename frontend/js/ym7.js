@@ -232,7 +232,7 @@ class YM7Application {
     connectWebSocket() {
         if (!this.accessToken) return;
         
-        const wsUrl = `ws://${window.location.host}`;
+       const wsUrl = window.YM7_CONFIG.WS_BASE;
         this.ws = new WebSocket(wsUrl);
         
         this.ws.onopen = () => {
