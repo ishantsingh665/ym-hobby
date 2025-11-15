@@ -1,218 +1,286 @@
-/**
- * YM7 Hobby - Chat Functionality
- * Handles real-time messaging, chat windows, and message management
- */
+// chat.js - Cleaned & corrected YM7 ChatManager
+// Notes:
+// - Replaces Object.keys(map).length with map.size
+// - Avoids inline onclick handlers; uses proper event listeners
+// - Safely checks DOM nodes and app properties
+// - Normalizes message field names and prevents duplicates
+// - Cleans up timers when closing chat windows
+
+window.chatManager = null; // ensure global exists early
 
 class ChatManager {
     constructor(app) {
-        this.app = app;
-        this.chatWindows = new Map();
-        this.typingIndicators = new Map();
+        this.app = app || {};
+        // messageHistory map: buddyId -> { messages: [], ids: Set() }
         this.messageHistory = new Map();
+        // chatWindows: buddyId -> DOM element
+        this.chatWindows = new Map();
+        // typingIndicators: buddyId -> timerId
+        this.typingIndicators = new Map();
         this.setupChatEventListeners();
     }
 
-    /**
-     * Setup chat event listeners
-     */
+    /* ---------- Setup ---------- */
+
     setupChatEventListeners() {
-        // Search functionality
         const searchInput = document.getElementById('buddySearch');
         const searchBtn = document.getElementById('searchBtn');
-        
+        const resultsContainer = document.getElementById('searchResults');
+
         if (searchInput) {
             searchInput.addEventListener('input', this.handleSearchInput.bind(this));
             searchInput.addEventListener('keypress', this.handleSearchKeypress.bind(this));
         }
-        
+
         if (searchBtn) {
             searchBtn.addEventListener('click', this.handleSearchClick.bind(this));
         }
 
-        // Global click handler for closing context menus
+        // Delegate clicks inside search results (handles Chat button clicks)
+        if (resultsContainer) {
+            resultsContainer.addEventListener('click', (e) => {
+                const btn = e.target.closest('.ym7-add-buddy-btn');
+                if (!btn) return;
+                const id = btn.dataset.userId;
+                if (!id) return;
+                this.startChat(Number(id));
+            });
+        }
+
+        // Global click handler to hide search results on outside click
         document.addEventListener('click', this.handleGlobalClick.bind(this));
     }
 
-    /**
-     * Open or focus chat window for a buddy
-     */
+    /* ---------- Chat window lifecycle ---------- */
+
     openChatWindow(buddy) {
-        const chatId = `chat-${buddy.id}`;
-        
-        // Check if chat window already exists
-        if (this.chatWindows.has(buddy.id)) {
-            const existingWindow = this.chatWindows.get(buddy.id);
+        if (!buddy || buddy.id == null) return null;
+        const buddyId = Number(buddy.id);
+
+        if (this.chatWindows.has(buddyId)) {
+            const existingWindow = this.chatWindows.get(buddyId);
             this.bringChatToFront(existingWindow);
             return existingWindow;
         }
 
-        // Create new chat window
         const chatWindow = this.createChatWindow(buddy);
-        this.chatWindows.set(buddy.id, chatWindow);
-        
-        // Load message history
-        this.loadMessageHistory(buddy.id);
-        
+        this.chatWindows.set(buddyId, chatWindow);
+        // initialize message history container structure if not exists
+        if (!this.messageHistory.has(buddyId)) {
+            this.messageHistory.set(buddyId, { messages: [], ids: new Set() });
+        }
+        this.loadMessageHistory(buddyId);
         return chatWindow;
     }
 
-    /**
-     * Create chat window HTML
-     */
     createChatWindow(buddy) {
-        const chatId = `chat-${buddy.id}`;
+        const buddyId = Number(buddy.id);
+        const chatId = `chat-${buddyId}`;
         const container = document.getElementById('chatWindowsContainer');
-        
+        if (!container) {
+            console.error('chatWindowsContainer not found in DOM');
+            return null;
+        }
+
         const chatWindow = document.createElement('div');
         chatWindow.className = 'chat-window';
         chatWindow.id = chatId;
-        chatWindow.dataset.buddyId = buddy.id;
-        
-        // Position window randomly but within viewport
-        const left = 100 + (Object.keys(this.chatWindows).length * 30);
-        const top = 100 + (Object.keys(this.chatWindows).length * 30);
+        chatWindow.dataset.buddyId = String(buddyId);
+
+        // Position windows by count of Map
+        const offset = this.chatWindows.size;
+        const left = 100 + (offset * 30);
+        const top = 100 + (offset * 30);
         chatWindow.style.left = `${left}px`;
         chatWindow.style.top = `${top}px`;
-        
-        chatWindow.innerHTML = `
-            <div class="chat-header">
-                <div class="chat-buddy-info">
-                    <div class="chat-buddy-status ${buddy.status}"></div>
-                    <span class="chat-buddy-name">${buddy.display_name || buddy.email}</span>
-                </div>
-                <div class="chat-controls">
-                    <button class="chat-minimize" onclick="chatManager.minimizeChat(${buddy.id})">_</button>
-                    <button class="chat-close" onclick="chatManager.closeChat(${buddy.id})">×</button>
-                </div>
-            </div>
-            <div class="chat-messages" id="${chatId}-messages">
-                <div class="chat-timestamp">Conversation started</div>
-            </div>
-            <div class="typing-indicator hidden" id="${chatId}-typing">
-                <span class="typing-dots">
-                    <span></span><span></span><span></span>
-                </span>
-                ${buddy.display_name} is typing...
-            </div>
-            <div class="chat-input-area">
-                <div class="chat-input-container">
-                    <textarea 
-                        class="chat-input" 
-                        id="${chatId}-input" 
-                        placeholder="Type a message..." 
-                        rows="1"
-                    ></textarea>
-                    <button class="chat-send-btn" onclick="chatManager.sendMessage(${buddy.id})">Send</button>
-                </div>
-            </div>
-        `;
-        
+
+        // Header
+        const header = document.createElement('div');
+        header.className = 'chat-header';
+
+        const buddyInfo = document.createElement('div');
+        buddyInfo.className = 'chat-buddy-info';
+
+        const status = document.createElement('div');
+        status.className = `chat-buddy-status ${buddy.status || ''}`;
+
+        const name = document.createElement('span');
+        name.className = 'chat-buddy-name';
+        name.textContent = buddy.display_name || buddy.email || 'Unknown User';
+
+        buddyInfo.appendChild(status);
+        buddyInfo.appendChild(name);
+
+        const controls = document.createElement('div');
+        controls.className = 'chat-controls';
+
+        const btnMin = document.createElement('button');
+        btnMin.className = 'chat-minimize';
+        btnMin.title = 'Minimize';
+        btnMin.textContent = '_';
+        btnMin.addEventListener('click', () => this.minimizeChat(buddyId));
+
+        const btnClose = document.createElement('button');
+        btnClose.className = 'chat-close';
+        btnClose.title = 'Close';
+        btnClose.textContent = '×';
+        btnClose.addEventListener('click', () => this.closeChat(buddyId));
+
+        controls.appendChild(btnMin);
+        controls.appendChild(btnClose);
+
+        header.appendChild(buddyInfo);
+        header.appendChild(controls);
+
+        // Messages container
+        const messages = document.createElement('div');
+        messages.className = 'chat-messages';
+        messages.id = `${chatId}-messages`;
+        const ts = document.createElement('div');
+        ts.className = 'chat-timestamp';
+        ts.textContent = 'Conversation started';
+        messages.appendChild(ts);
+
+        // Typing indicator
+        const typingIndicator = document.createElement('div');
+        typingIndicator.className = 'typing-indicator hidden';
+        typingIndicator.id = `${chatId}-typing`;
+        const typingDots = document.createElement('span');
+        typingDots.className = 'typing-dots';
+        typingDots.innerHTML = '<span></span><span></span><span></span>';
+        typingIndicator.appendChild(typingDots);
+        const typingText = document.createElement('span');
+        typingText.textContent = `${buddy.display_name || buddy.email} is typing...`;
+        typingIndicator.appendChild(typingText);
+
+        // Input area
+        const inputArea = document.createElement('div');
+        inputArea.className = 'chat-input-area';
+
+        const inputContainer = document.createElement('div');
+        inputContainer.className = 'chat-input-container';
+
+        const textarea = document.createElement('textarea');
+        textarea.className = 'chat-input';
+        textarea.id = `${chatId}-input`;
+        textarea.placeholder = 'Type a message...';
+        textarea.rows = 1;
+
+        const sendBtn = document.createElement('button');
+        sendBtn.className = 'chat-send-btn';
+        sendBtn.textContent = 'Send';
+        sendBtn.addEventListener('click', () => this.sendMessage(buddyId));
+
+        inputContainer.appendChild(textarea);
+        inputContainer.appendChild(sendBtn);
+        inputArea.appendChild(inputContainer);
+
+        // Assemble window
+        chatWindow.appendChild(header);
+        chatWindow.appendChild(messages);
+        chatWindow.appendChild(typingIndicator);
+        chatWindow.appendChild(inputArea);
+
         container.appendChild(chatWindow);
-        
-        // Setup event listeners for this chat window
-        this.setupChatWindowEvents(chatWindow, buddy.id);
-        
+
+        // Setup interactions
+        this.setupChatWindowEvents(chatWindow, buddyId);
+
         // Bring to front
         this.bringChatToFront(chatWindow);
-        
+
         return chatWindow;
     }
 
-    /**
-     * Setup event listeners for a chat window
-     */
     setupChatWindowEvents(chatWindow, buddyId) {
+        if (!chatWindow) return;
         const input = chatWindow.querySelector('.chat-input');
-        const sendBtn = chatWindow.querySelector('.chat-send-btn');
-        
-        // Input events
-        input.addEventListener('input', () => {
-            this.handleChatInput(buddyId, input.value);
-            this.autoResizeTextarea(input);
-        });
-        
-        input.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                this.sendMessage(buddyId);
-            }
-        });
-        
-        input.addEventListener('focus', () => {
-            this.markMessagesAsRead(buddyId);
-        });
-        
-        // Drag events for chat header
+        if (input) {
+            input.addEventListener('input', () => {
+                this.handleChatInput(buddyId, input.value);
+                this.autoResizeTextarea(input);
+            });
+
+            input.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    this.sendMessage(buddyId);
+                }
+            });
+
+            input.addEventListener('focus', () => {
+                this.markMessagesAsRead(buddyId);
+            });
+        }
+
         const header = chatWindow.querySelector('.chat-header');
-        header.addEventListener('mousedown', (e) => {
-            if (!e.target.closest('.chat-controls')) {
-                this.app.handleWindowDragStart(e);
-            }
-        });
+        if (header && this.app && typeof this.app.handleWindowDragStart === 'function') {
+            header.addEventListener('mousedown', (e) => {
+                if (!e.target.closest('.chat-controls')) {
+                    this.app.handleWindowDragStart(e);
+                }
+            });
+        }
     }
 
-    /**
-     * Auto-resize textarea based on content
-     */
+    /* ---------- UI helpers ---------- */
+
     autoResizeTextarea(textarea) {
+        if (!textarea) return;
         textarea.style.height = 'auto';
         textarea.style.height = Math.min(textarea.scrollHeight, 80) + 'px';
     }
 
-    /**
-     * Handle chat input for typing indicators
-     */
     handleChatInput(buddyId, text) {
-        if (text.trim().length > 0) {
+        if (text && text.trim().length > 0) {
             this.startTypingIndicator(buddyId);
         } else {
             this.stopTypingIndicator(buddyId);
         }
     }
 
-    /**
-     * Start typing indicator
-     */
     startTypingIndicator(buddyId) {
-        // Clear existing timer
+        // clear existing timer
         if (this.typingIndicators.has(buddyId)) {
             clearTimeout(this.typingIndicators.get(buddyId));
         }
-        
-        // Send typing start via WebSocket
-        if (this.app.ws && this.app.isConnected) {
-            this.app.ws.send(JSON.stringify({
-                type: 'typing_start',
-                toUserId: buddyId
-            }));
+
+        // send typing_start via WS if available
+        if (this.app && this.app.ws && this.app.isConnected) {
+            try {
+                this.app.ws.send(JSON.stringify({
+                    type: 'typing_start',
+                    toUserId: buddyId
+                }));
+            } catch (e) {
+                // ignore send errors
+            }
         }
-        
-        // Set timer to stop typing after 3 seconds
+
+        // set timer to stop
         const timer = setTimeout(() => {
             this.stopTypingIndicator(buddyId);
         }, 3000);
-        
         this.typingIndicators.set(buddyId, timer);
     }
 
-    /**
-     * Stop typing indicator
-     */
     stopTypingIndicator(buddyId) {
         if (this.typingIndicators.has(buddyId)) {
             clearTimeout(this.typingIndicators.get(buddyId));
             this.typingIndicators.delete(buddyId);
         }
-        
-        // Send typing stop via WebSocket
-        if (this.app.ws && this.app.isConnected) {
-            this.app.ws.send(JSON.stringify({
-                type: 'typing_stop',
-                toUserId: buddyId
-            }));
+
+        if (this.app && this.app.ws && this.app.isConnected) {
+            try {
+                this.app.ws.send(JSON.stringify({
+                    type: 'typing_stop',
+                    toUserId: buddyId
+                }));
+            } catch (e) {
+                // ignore send errors
+            }
         }
-        
-        // Hide typing indicator in UI
+
         const chatId = `chat-${buddyId}`;
         const typingIndicator = document.getElementById(`${chatId}-typing`);
         if (typingIndicator) {
@@ -220,212 +288,232 @@ class ChatManager {
         }
     }
 
-    /**
-     * Send message to buddy
-     */
+    /* ---------- Messaging ---------- */
+
     async sendMessage(buddyId) {
         const chatId = `chat-${buddyId}`;
         const input = document.getElementById(`${chatId}-input`);
+        if (!input) return;
         const message = input.value.trim();
-        
         if (!message) return;
-        
+
+        // Cleanup input UI immediately
+        input.value = '';
+        input.style.height = 'auto';
+        this.stopTypingIndicator(buddyId);
+
+        const payload = {
+            type: 'private_message',
+            toUserId: buddyId,
+            message: message
+        };
+
         try {
-            // Clear input and reset height
-            input.value = '';
-            input.style.height = 'auto';
-            
-            // Stop typing indicator
-            this.stopTypingIndicator(buddyId);
-            
-            // Send via WebSocket if connected
-            if (this.app.ws && this.app.isConnected) {
-                this.app.ws.send(JSON.stringify({
-                    type: 'private_message',
+            if (this.app && this.app.ws && this.app.isConnected) {
+                this.app.ws.send(JSON.stringify(payload));
+                // optimistically display outgoing message
+                const msg = {
+                    fromUserId: this.app.currentUser ? this.app.currentUser.id : null,
                     toUserId: buddyId,
-                    message: message
-                }));
+                    message,
+                    messageId: `local-${Date.now()}`,
+                    timestamp: new Date().toISOString(),
+                    direction: 'outgoing'
+                };
+                this.displayMessage(msg);
+                this._storeMessage(msg);
             } else {
-                // Fallback to HTTP API
+                // fallback to HTTP
+                if (!this.app || typeof this.app.authenticatedFetch !== 'function') {
+                    throw new Error('No transport available to send message');
+                }
                 const response = await this.app.authenticatedFetch('/api/messages/private', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        toUserId: buddyId,
-                        message: message
-                    })
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ toUserId: buddyId, message })
                 });
-                
                 if (response.ok) {
                     const data = await response.json();
-                    this.displayMessage({
-                        fromUserId: this.app.currentUser.id,
+                    const msg = {
+                        fromUserId: this.app.currentUser ? this.app.currentUser.id : null,
                         toUserId: buddyId,
-                        message: message,
-                        messageId: data.messageId,
-                        timestamp: data.timestamp,
+                        message,
+                        messageId: data.messageId || `server-${Date.now()}`,
+                        timestamp: data.timestamp || new Date().toISOString(),
                         direction: 'outgoing'
-                    });
+                    };
+                    this.displayMessage(msg);
+                    this._storeMessage(msg);
+                } else {
+                    throw new Error('HTTP send failed');
                 }
             }
-            
         } catch (error) {
             console.error('Error sending message:', error);
-            this.app.showNotification('Failed to send message', 'error');
+            if (this.app && typeof this.app.showNotification === 'function') {
+                this.app.showNotification('Failed to send message', 'error');
+            }
         }
     }
 
-    /**
-     * Handle incoming message from WebSocket
-     */
     handleIncomingMessage(message) {
-        // Add to message history
-        if (!this.messageHistory.has(message.fromUserId)) {
-            this.messageHistory.set(message.fromUserId, []);
-        }
-        this.messageHistory.get(message.fromUserId).push({
+        // Normalize fields
+        const from = message.fromUserId || message.from_user_id || message.from;
+        const to = message.toUserId || message.to_user_id || message.to;
+        const msgId = message.messageId || message.message_id || message.id || `srv-${Date.now()}`;
+
+        const normalized = {
             ...message,
-            direction: 'incoming',
-            timestamp: message.timestamp || new Date().toISOString()
-        });
-        
-        // Display message
-        this.displayMessage({
-            ...message,
-            direction: 'incoming'
-        });
-        
-        // Show notification if chat is not active
-        if (!this.isChatActive(message.fromUserId)) {
-            this.showMessageNotification(message);
-        }
-        
-        // Mark as read if chat is open and focused
-        if (this.isChatActive(message.fromUserId)) {
-            this.markMessagesAsRead(message.fromUserId);
+            fromUserId: from,
+            toUserId: to,
+            messageId: msgId,
+            timestamp: message.timestamp || new Date().toISOString(),
+            direction: (from && this.app && this.app.currentUser && from === this.app.currentUser.id) ? 'outgoing' : 'incoming'
+        };
+
+        // store and display
+        this._storeMessage(normalized);
+        this.displayMessage(normalized);
+
+        // notification if chat not active
+        if (!this.isChatActive(normalized.fromUserId)) {
+            this.showMessageNotification(normalized);
+        } else {
+            this.markMessagesAsRead(normalized.fromUserId);
         }
     }
 
-    /**
-     * Display message in chat window
-     */
     displayMessage(message) {
         const buddyId = message.direction === 'incoming' ? message.fromUserId : message.toUserId;
         const chatId = `chat-${buddyId}`;
-        
-        // Ensure chat window exists
         if (!this.chatWindows.has(buddyId)) {
-            const buddy = this.app.buddies.find(b => b.id === buddyId);
-            if (buddy) {
-                this.openChatWindow(buddy);
-            } else {
-                console.warn('Cannot display message: buddy not found', buddyId);
-                return;
-            }
+            // try to open from app.buddies; fallback to minimal user
+            const buddy = (this.app.buddies || []).find(b => b.id === buddyId) || { id: buddyId, email: 'Unknown User', display_name: null, status: 'offline' };
+            this.openChatWindow(buddy);
         }
-        
+
         const messagesContainer = document.getElementById(`${chatId}-messages`);
         if (!messagesContainer) return;
-        
-        // Create message element
+
+        // prevent duplicate display if messageId already rendered
+        const hist = this.messageHistory.get(Number(buddyId));
+        if (hist && hist.ids.has(message.messageId)) return;
+
+        // create element
         const messageElement = document.createElement('div');
         messageElement.className = `chat-message ${message.direction === 'outgoing' ? 'own' : 'buddy'}`;
         messageElement.dataset.messageId = message.messageId;
-        
-        const timestamp = new Date(message.timestamp).toLocaleTimeString([], { 
-            hour: '2-digit', 
-            minute: '2-digit' 
-        });
-        
-        messageElement.innerHTML = `
-            ${message.direction === 'incoming' ? 
-                `<div class="chat-message-sender">${this.getBuddyName(buddyId)}</div>` : 
-                ''
-            }
-            <div class="chat-message-text">${this.escapeHtml(message.message)}</div>
-            <div class="chat-message-time">
-                ${timestamp}
-                ${message.direction === 'outgoing' ? 
-                    '<span class="message-status sent"></span>' : 
-                    ''
-                }
-            </div>
-        `;
-        
+
+        if (message.direction === 'incoming') {
+            const senderLabel = document.createElement('div');
+            senderLabel.className = 'chat-message-sender';
+            senderLabel.textContent = this.getBuddyName(buddyId);
+            messageElement.appendChild(senderLabel);
+        }
+
+        const textEl = document.createElement('div');
+        textEl.className = 'chat-message-text';
+        textEl.textContent = message.message || '';
+        messageElement.appendChild(textEl);
+
+        const timeEl = document.createElement('div');
+        timeEl.className = 'chat-message-time';
+        const ts = new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        timeEl.textContent = ts;
+        if (message.direction === 'outgoing') {
+            const statusSpan = document.createElement('span');
+            statusSpan.className = 'message-status sent';
+            timeEl.appendChild(statusSpan);
+        }
+        messageElement.appendChild(timeEl);
+
         messagesContainer.appendChild(messageElement);
-        
-        // Scroll to bottom
         messagesContainer.scrollTop = messagesContainer.scrollHeight;
-        
-        // Add new message animation
+
+        // animation
         messageElement.style.animation = 'fadeIn 0.3s ease-out';
     }
 
-    /**
-     * Load message history for a buddy
-     */
+    /* ---------- History / persistence helpers ---------- */
+
+    _storeMessage(message) {
+        const buddyId = message.direction === 'incoming' ? message.fromUserId : message.toUserId;
+        const id = message.messageId;
+        if (buddyId == null || id == null) return;
+
+        if (!this.messageHistory.has(Number(buddyId))) {
+            this.messageHistory.set(Number(buddyId), { messages: [], ids: new Set() });
+        }
+        const hist = this.messageHistory.get(Number(buddyId));
+        if (!hist.ids.has(id)) {
+            hist.ids.add(id);
+            hist.messages.push(message);
+        }
+    }
+
     async loadMessageHistory(buddyId) {
+        if (!this.app || typeof this.app.authenticatedFetch !== 'function') return;
         try {
             const response = await this.app.authenticatedFetch(`/api/messages/conversation/${buddyId}?limit=50`);
-            if (response.ok) {
-                const data = await response.json();
-                this.messageHistory.set(buddyId, data.messages || []);
-                
-                // Display messages
-                data.messages.forEach(message => {
-                    this.displayMessage({
-                        ...message,
-                        direction: message.from_user_id === this.app.currentUser.id ? 'outgoing' : 'incoming'
-                    });
-                });
+            if (!response || !response.ok) return;
+            const data = await response.json();
+            const msgs = Array.isArray(data.messages) ? data.messages : (data || []);
+            // initialize history structure
+            if (!this.messageHistory.has(Number(buddyId))) {
+                this.messageHistory.set(Number(buddyId), { messages: [], ids: new Set() });
             }
-        } catch (error) {
-            console.error('Error loading message history:', error);
-        }
-    }
-
-    /**
-     * Handle typing indicator from WebSocket
-     */
-    handleTypingIndicator(message) {
-        const chatId = `chat-${message.fromUserId}`;
-        const typingIndicator = document.getElementById(`${chatId}-typing`);
-        
-        if (typingIndicator) {
-            if (message.type === 'typing_start') {
-                typingIndicator.classList.remove('hidden');
-            } else {
-                typingIndicator.classList.add('hidden');
-            }
-        }
-    }
-
-    /**
-     * Handle message read receipt
-     */
-    handleMessageRead(message) {
-        // Update message status in UI
-        const messageElement = document.querySelector(`[data-message-id="${message.messageId}"]`);
-        if (messageElement) {
-            const statusElement = messageElement.querySelector('.message-status');
-            if (statusElement) {
-                statusElement.className = 'message-status read';
-            }
-        }
-    }
-
-    /**
-     * Mark messages as read
-     */
-    async markMessagesAsRead(buddyId) {
-        try {
-            await this.app.authenticatedFetch(`/api/messages/conversation/${buddyId}/read`, {
-                method: 'POST'
+            const hist = this.messageHistory.get(Number(buddyId));
+            msgs.forEach(m => {
+                const from = m.fromUserId || m.from_user_id || m.from;
+                const to = m.toUserId || m.to_user_id || m.to;
+                const id = m.messageId || m.message_id || m.id;
+                const normalized = {
+                    ...m,
+                    fromUserId: from,
+                    toUserId: to,
+                    messageId: id,
+                    timestamp: m.timestamp || new Date().toISOString(),
+                    direction: (from && this.app && this.app.currentUser && from === this.app.currentUser.id) ? 'outgoing' : 'incoming'
+                };
+                if (!hist.ids.has(normalized.messageId)) {
+                    hist.ids.add(normalized.messageId);
+                    hist.messages.push(normalized);
+                    this.displayMessage(normalized);
+                }
             });
-            
-            // Update UI
+        } catch (e) {
+            console.error('Error loading message history:', e);
+        }
+    }
+
+    /* ---------- Typing / receipts ---------- */
+
+    handleTypingIndicator(message) {
+        const from = message.fromUserId || message.from_user_id || message.from;
+        const chatId = `chat-${from}`;
+        const typingIndicator = document.getElementById(`${chatId}-typing`);
+        if (!typingIndicator) return;
+        if (message.type === 'typing_start') {
+            typingIndicator.classList.remove('hidden');
+        } else {
+            typingIndicator.classList.add('hidden');
+        }
+    }
+
+    handleMessageRead(message) {
+        const el = document.querySelector(`[data-message-id="${message.messageId}"]`);
+        if (el) {
+            const status = el.querySelector('.message-status');
+            if (status) {
+                status.className = 'message-status read';
+            }
+        }
+    }
+
+    async markMessagesAsRead(buddyId) {
+        if (!this.app || typeof this.app.authenticatedFetch !== 'function') return;
+        try {
+            await this.app.authenticatedFetch(`/api/messages/conversation/${buddyId}/read`, { method: 'POST' });
             const chatId = `chat-${buddyId}`;
             const messages = document.querySelectorAll(`#${chatId}-messages .chat-message.own .message-status`);
             messages.forEach(status => {
@@ -433,83 +521,76 @@ class ChatManager {
                     status.className = 'message-status read';
                 }
             });
-            
-        } catch (error) {
-            console.error('Error marking messages as read:', error);
+        } catch (e) {
+            console.error('Error marking messages as read:', e);
         }
     }
 
-    /**
-     * Check if chat window is active (open and focused)
-     */
+    /* ---------- Utilities ---------- */
+
     isChatActive(buddyId) {
-        const chatWindow = this.chatWindows.get(buddyId);
+        const chatWindow = this.chatWindows.get(Number(buddyId));
         if (!chatWindow) return false;
-        
-        return !chatWindow.classList.contains('hidden') && 
-               !chatWindow.classList.contains('minimized');
+        return !chatWindow.classList.contains('hidden') && !chatWindow.classList.contains('minimized');
     }
 
-    /**
-     * Show notification for new message
-     */
     showMessageNotification(message) {
         const buddyName = this.getBuddyName(message.fromUserId);
-        this.app.showNotification(`New message from ${buddyName}: ${message.message}`, 'info', 5000);
-        
-        // Flash chat window in taskbar (simulated)
-        const chatWindow = this.chatWindows.get(message.fromUserId);
+        if (this.app && typeof this.app.showNotification === 'function') {
+            this.app.showNotification(`New message from ${buddyName}: ${message.message}`, 'info', 5000);
+        }
+        const chatWindow = this.chatWindows.get(Number(message.fromUserId));
         if (chatWindow) {
             chatWindow.classList.add('has-unread');
         }
     }
 
-    /**
-     * Get buddy name by ID
-     */
     getBuddyName(buddyId) {
-        const buddy = this.app.buddies.find(b => b.id === buddyId);
-        return buddy ? (buddy.display_name || buddy.email) : 'Unknown User';
+        const buddy = (this.app.buddies || []).find(b => Number(b.id) === Number(buddyId));
+        return buddy ? (buddy.display_name || buddy.email || 'Unknown User') : 'Unknown User';
     }
 
-    /**
-     * Bring chat window to front
-     */
     bringChatToFront(chatWindow) {
-        this.app.bringWindowToFront(chatWindow);
-        
-        // Remove unread indicator
+        if (!chatWindow) return;
+        if (this.app && typeof this.app.bringWindowToFront === 'function') {
+            this.app.bringWindowToFront(chatWindow);
+        } else {
+            // fallback z-index bump
+            chatWindow.style.zIndex = (parseInt(chatWindow.style.zIndex || 1000) + 1).toString();
+        }
         chatWindow.classList.remove('has-unread');
-        
-        // Mark messages as read
-        const buddyId = chatWindow.dataset.buddyId;
-        this.markMessagesAsRead(buddyId);
+
+        const buddyId = parseInt(chatWindow.dataset.buddyId, 10);
+        if (!Number.isNaN(buddyId)) {
+            this.markMessagesAsRead(buddyId);
+        }
     }
 
-    /**
-     * Minimize chat window
-     */
     minimizeChat(buddyId) {
-        const chatWindow = this.chatWindows.get(buddyId);
+        const chatWindow = this.chatWindows.get(Number(buddyId));
         if (chatWindow) {
             chatWindow.classList.toggle('minimized');
         }
     }
 
-    /**
-     * Close chat window
-     */
     closeChat(buddyId) {
-        const chatWindow = this.chatWindows.get(buddyId);
+        const id = Number(buddyId);
+        const chatWindow = this.chatWindows.get(id);
         if (chatWindow) {
+            // cleanup timers
+            if (this.typingIndicators.has(id)) {
+                clearTimeout(this.typingIndicators.get(id));
+                this.typingIndicators.delete(id);
+            }
+            // remove DOM
             chatWindow.remove();
-            this.chatWindows.delete(buddyId);
+            this.chatWindows.delete(id);
+            // do not purge messageHistory by default, user may reopen
         }
     }
 
-    /**
-     * Handle search input
-     */
+    /* ---------- Search ---------- */
+
     handleSearchInput(e) {
         const query = e.target.value.trim();
         if (query.length >= 2) {
@@ -519,135 +600,82 @@ class ChatManager {
         }
     }
 
-    /**
-     * Handle search keypress
-     */
     handleSearchKeypress(e) {
         if (e.key === 'Enter') {
-            this.performSearch(e.target.value.trim());
+            const q = e.target.value.trim();
+            this.performSearch(q);
         }
     }
 
-    /**
-     * Handle search button click
-     */
     handleSearchClick() {
-        const query = document.getElementById('buddySearch').value.trim();
+        const el = document.getElementById('buddySearch');
+        const query = el ? el.value.trim() : '';
         this.performSearch(query);
     }
 
-    /**
-     * Perform user search
-     */
     async performSearch(query) {
         if (!query || query.length < 2) return;
-        
+        if (!this.app || typeof this.app.authenticatedFetch !== 'function') return;
         try {
             const response = await this.app.authenticatedFetch(`/api/users/search?query=${encodeURIComponent(query)}`);
-            if (response.ok) {
-                const data = await response.json();
-                this.displaySearchResults(data.users);
-            }
-        } catch (error) {
-            console.error('Search error:', error);
+            if (!response || !response.ok) return;
+            const data = await response.json();
+            this.displaySearchResults(Array.isArray(data.users) ? data.users : []);
+        } catch (e) {
+            console.error('Search error:', e);
         }
     }
 
-    /**
-     * Display search results
-     */
     displaySearchResults(users) {
         const resultsContainer = document.getElementById('searchResults');
         if (!resultsContainer) return;
-        
-        if (users.length === 0) {
+        if (!Array.isArray(users) || users.length === 0) {
             resultsContainer.innerHTML = '<div class="ym7-search-result">No users found</div>';
         } else {
-            resultsContainer.innerHTML = users.map(user => `
-                <div class="ym7-search-result">
+            // build HTML safely and include dataset for userId
+            resultsContainer.innerHTML = users.map(user => {
+                const name = (user.display_name || user.email || 'Unknown User').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                const email = (user.email || '').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+                return `<div class="ym7-search-result">
                     <div class="ym7-search-info">
-                        <div class="ym7-search-name">${user.display_name}</div>
-                        <div class="ym7-search-email">${user.email}</div>
+                        <div class="ym7-search-name">${name}</div>
+                        <div class="ym7-search-email">${email}</div>
                     </div>
-                    <button class="ym7-add-buddy-btn" onclick="chatManager.startChat(${user.id})">
-                        Chat
-                    </button>
-                </div>
-            `).join('');
+                    <button class="ym7-add-buddy-btn" data-user-id="${Number(user.id)}">Chat</button>
+                </div>`;
+            }).join('');
         }
-        
         resultsContainer.classList.remove('hidden');
     }
 
-    /**
-     * Hide search results
-     */
     hideSearchResults() {
         const resultsContainer = document.getElementById('searchResults');
-        if (resultsContainer) {
-            resultsContainer.classList.add('hidden');
-        }
+        if (resultsContainer) resultsContainer.classList.add('hidden');
     }
 
-    /**
-     * Start chat with user (for search results)
-     */
     startChat(userId) {
-        const user = this.app.buddies.find(b => b.id === userId) || 
-                    { id: userId, email: 'Unknown User', status: 'offline' };
+        const user = (this.app.buddies || []).find(b => Number(b.id) === Number(userId)) ||
+            { id: Number(userId), email: 'Unknown User', status: 'offline', display_name: null };
         this.openChatWindow(user);
         this.hideSearchResults();
-        
-        // Clear search input
-        document.getElementById('buddySearch').value = '';
+        const searchEl = document.getElementById('buddySearch');
+        if (searchEl) searchEl.value = '';
     }
 
-    /**
-     * Handle global click (for closing context menus)
-     */
     handleGlobalClick(e) {
-        // Close search results when clicking outside
-        if (!e.target.closest('.ym7-search-box') && !e.target.closest('.ym7-search-results')) {
+        if (!e.target.closest('.ym7-search-box') && !e.target.closest('#searchResults')) {
             this.hideSearchResults();
         }
     }
-
-    /**
-     * Escape HTML to prevent XSS
-     */
-    escapeHtml(text) {
-        const div = document.createElement('div');
-        div.textContent = text;
-        return div.innerHTML;
-    }
 }
 
-// Initialize chat manager when DOM is loaded
-document.addEventListener('DOMContentLoaded', function() {
-    setTimeout(() => {
-        if (window.app) {
-            window.chatManager = new ChatManager(window.app);
-        }
-    }, 100);
+/* ---------- Auto-initialize when DOM ready ---------- */
+document.addEventListener('DOMContentLoaded', function () {
+    // create chatManager early so inline code that expects it will not fail
+    if (!window.chatManager) {
+        window.chatManager = new ChatManager(window.app || {});
+    } else if (window.chatManager && window.chatManager.app == null && window.app) {
+        // if chatManager exists but needs app
+        window.chatManager.app = window.app;
+    }
 });
-
-/**
- * Global functions for chat operations
- */
-function sendMessage(buddyId) {
-    if (window.chatManager) {
-        window.chatManager.sendMessage(buddyId);
-    }
-}
-
-function minimizeChat(buddyId) {
-    if (window.chatManager) {
-        window.chatManager.minimizeChat(buddyId);
-    }
-}
-
-function closeChat(buddyId) {
-    if (window.chatManager) {
-        window.chatManager.closeChat(buddyId);
-    }
-}
