@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>YM7 Hobby - Yahoo Messenger Revival</title>
+    <link rel="stylesheet" href="css/ym7.css">
+    <link rel="stylesheet" href="css/login.css">
+    <link rel="stylesheet" href="css/chat.css">
+    <link rel="icon" type="image/x-icon" href="images/icons/favicon.ico">
+</head>
+<body>
+    <!-- Login Window -->
+    <div id="loginWindow" class="ym7-window login-window">
+        <div class="ym7-title-bar">
+            <span class="ym7-title">Yahoo! Messenger - Login</span>
+            <div class="ym7-window-controls">
+                <button class="ym7-minimize" onclick="minimizeWindow('loginWindow')">_</button>
+                <button class="ym7-close" onclick="closeWindow('loginWindow')">×</button>
+            </div>
+        </div>
+        
+        <div class="ym7-content login-content">
+            <div class="login-header">
+                <img src="images/icons/ym7-logo.png" alt="YM7 Hobby" class="login-logo" onerror="this.style.display='none'">
+                <h2>YM7 Hobby</h2>
+                <p>Classic Yahoo Messenger Revival</p>
+            </div>
+            
+            <form id="loginForm" class="login-form">
+                <div class="form-group">
+                    <input type="email" id="loginEmail" placeholder="Email Address" required>
+                </div>
+                <div class="form-group">
+                    <input type="password" id="loginPassword" placeholder="Password" required>
+                </div>
+                <div class="form-options">
+                    <label>
+                        <input type="checkbox" id="rememberMe"> Remember me
+                    </label>
+                </div>
+                <button type="submit" class="ym7-btn ym7-btn-primary login-btn">Login</button>
+            </form>
+            
+            <div class="login-links">
+                <a href="#" id="showRegister">Create New Account</a>
+                <a href="#" id="showForgotPassword">Forgot Password?</a>
+            </div>
+            
+            <div class="login-status" id="loginStatus"></div>
+        </div>
+    </div>
+
+    <!-- Register Window -->
+    <div id="registerWindow" class="ym7-window login-window hidden">
+        <div class="ym7-title-bar">
+            <span class="ym7-title">Yahoo! Messenger - Sign Up</span>
+            <div class="ym7-window-controls">
+                <button class="ym7-minimize" onclick="minimizeWindow('registerWindow')">_</button>
+                <button class="ym7-close" onclick="closeWindow('registerWindow')">×</button>
+            </div>
+        </div>
+        
+        <div class="ym7-content login-content">
+            <div class="login-header">
+                <h2>Create Account</h2>
+                <p>Join YM7 Hobby today</p>
+            </div>
+            
+            <form id="registerForm" class="login-form">
+                <div class="form-group">
+                    <input type="email" id="registerEmail" placeholder="Email Address" required>
+                </div>
+                <div class="form-group">
+                    <input type="text" id="registerDisplayName" placeholder="Display Name" required>
+                </div>
+                <div class="form-group">
+                    <input type="password" id="registerPassword" placeholder="Password" required>
+                    <div class="password-strength" id="passwordStrength"></div>
+                </div>
+                <div class="form-group">
+                    <input type="password" id="registerConfirmPassword" placeholder="Confirm Password" required>
+                </div>
+                <button type="submit" class="ym7-btn ym7-btn-primary login-btn">Create Account</button>
+            </form>
+            
+            <div class="login-links">
+                <a href="#" id="showLogin">Back to Login</a>
+            </div>
+            
+            <div class="login-status" id="registerStatus"></div>
+        </div>
+    </div>
+
+    <!-- Forgot Password Window -->
+    <div id="forgotPasswordWindow" class="ym7-window login-window hidden">
+        <div class="ym7-title-bar">
+            <span class="ym7-title">Reset Password</span>
+            <div class="ym7-window-controls">
+                <button class="ym7-minimize" onclick="minimizeWindow('forgotPasswordWindow')">_</button>
+                <button class="ym7-close" onclick="closeWindow('forgotPasswordWindow')">×</button>
+            </div>
+        </div>
+        
+        <div class="ym7-content login-content">
+            <div class="login-header">
+                <h2>Reset Your Password</h2>
+                <p>Enter your email to receive a reset link</p>
+            </div>
+            
+            <form id="forgotPasswordForm" class="login-form">
+                <div class="form-group">
+                    <input type="email" id="forgotPasswordEmail" placeholder="Email Address" required>
+                </div>
+                <button type="submit" class="ym7-btn ym7-btn-primary login-btn">Send Reset Link</button>
+            </form>
+            
+            <div class="login-links">
+                <a href="#" id="showLoginFromForgot">Back to Login</a>
+            </div>
+            
+            <div class="login-status" id="forgotPasswordStatus"></div>
+        </div>
+    </div>
+
+    <!-- Main Application Interface (Hidden until login) -->
+    <div id="mainInterface" class="hidden">
+        <!-- Buddy List Window -->
+        <div class="ym7-main-window">
+            <div class="ym7-title-bar">
+                <span class="ym7-title">Yahoo! Messenger</span>
+                <div class="ym7-window-controls">
+                    <button class="ym7-minimize" onclick="minimizeMainWindow()">_</button>
+                    <button class="ym7-close" onclick="logout()">×</button>
+                </div>
+            </div>
+            
+            <div class="ym7-menu-bar">
+                <span class="ym7-menu-item" onclick="showContactsMenu()">Contacts</span>
+                <span class="ym7-menu-item" onclick="showActionsMenu()">Actions</span>
+                <span class="ym7-menu-item" onclick="showHelpMenu()">Help</span>
+            </div>
+
+            <!-- Search Box -->
+            <div class="ym7-search-box">
+                <input type="text" id="buddySearch" placeholder="Search for buddies...">
+                <button id="searchBtn" class="ym7-search-btn">Search</button>
+            </div>
+
+            <!-- Search Results -->
+            <div id="searchResults" class="ym7-search-results hidden"></div>
+
+            <!-- Buddy List -->
+            <div class="ym7-buddy-list" id="buddyList">
+                <div class="ym7-buddy-group">
+                    <div class="ym7-group-header" onclick="toggleGroup('onlineGroup')">
+                        Online (0)
+                    </div>
+                    <div id="onlineGroup" class="ym7-group-content">
+                        <!-- Online buddies will be populated here -->
+                    </div>
+                </div>
+                
+                <div class="ym7-buddy-group">
+                    <div class="ym7-group-header" onclick="toggleGroup('offlineGroup')">
+                        Offline (0)
+                    </div>
+                    <div id="offlineGroup" class="ym7-group-content">
+                        <!-- Offline buddies will be populated here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Status Bar -->
+            <div class="ym7-status-bar">
+                <select id="statusSelect" onchange="updateStatus(this.value)">
+                    <option value="online">Online</option>
+                    <option value="away">Away</option>
+                    <option value="busy">Busy</option>
+                    <option value="offline">Offline</option>
+                </select>
+                <span class="ym7-user-info" id="userDisplayName"></span>
+            </div>
+        </div>
+
+        <!-- Chat Windows Container -->
+        <div id="chatWindowsContainer"></div>
+
+        <!-- Add Buddy Modal -->
+        <div id="addBuddyModal" class="ym7-modal hidden">
+            <div class="ym7-modal-content">
+                <div class="ym7-modal-header">
+                    <span>Add Buddy</span>
+                    <button class="ym7-close" onclick="closeModal('addBuddyModal')">×</button>
+                </div>
+                <div class="ym7-modal-body">
+                    <input type="email" id="buddyEmail" placeholder="Enter buddy's email address">
+                </div>
+                <div class="ym7-modal-footer">
+                    <button class="ym7-btn" onclick="closeModal('addBuddyModal')">Cancel</button>
+                    <button class="ym7-btn ym7-btn-primary" onclick="sendBuddyRequest()">Add Buddy</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Pending Requests Modal -->
+        <div id="pendingRequestsModal" class="ym7-modal hidden">
+            <div class="ym7-modal-content">
+                <div class="ym7-modal-header">
+                    <span>Pending Buddy Requests</span>
+                    <button class="ym7-close" onclick="closeModal('pendingRequestsModal')">×</button>
+                </div>
+                <div class="ym7-modal-body" id="pendingRequestsList">
+                    <!-- Pending requests will be populated here -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Notification System -->
+    <div id="notificationContainer" class="ym7-notifications"></div>
+
+    <!-- Loading Overlay -->
+    <div id="loadingOverlay" class="ym7-loading hidden">
+        <div class="ym7-loading-spinner"></div>
+        <div class="ym7-loading-text">Connecting...</div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="js/auth.js"></script>
+    <script src="js/ym7.js"></script>
+    <script src="js/chat.js"></script>
+    <script src="js/buddies.js"></script>
+    <script src="js/search.js"></script>
+    <script src="js/webrtc.js"></script>
+
+    <script>
+        // Initialize application when DOM is loaded
+        document.addEventListener('DOMContentLoaded', function() {
+            initializeApp();
+        });
+    </script>
+</body>
+</html>
