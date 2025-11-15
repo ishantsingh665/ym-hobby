@@ -676,12 +676,18 @@ class YM7Application {
     /**
      * Make authenticated API request with token refresh
      */
-    async authenticatedFetch(url, options = {}) {
-        if (!options.headers) {
-            options.headers = {};
-        }
-        
-        options.headers['Authorization'] = `Bearer ${this.accessToken}`;
+            async authenticatedFetch(url, options = {}) {
+            // Prepend API base path using config
+            if (url.startsWith('/api/')) {
+                url = window.YM7_CONFIG.API_BASE + url;
+            }
+            
+            if (!options.headers) {
+                options.headers = {};
+            }
+            
+            options.headers['Authorization'] = `Bearer ${this.accessToken}`;
+
         
         let response = await fetch(url, options);
         
