@@ -112,7 +112,7 @@ class AuthManager {
         try {
             this.setFormLoading('loginForm', true);
             
-            const response = await fetch('/api/auth/login', {
+            const response = await fetch(window.YM7_CONFIG.API_BASE + '/api/auth/login', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -209,7 +209,7 @@ class AuthManager {
         try {
             this.setFormLoading('registerForm', true);
             
-            const response = await fetch('/api/auth/register', {
+            const response = await fetch(window.YM7_CONFIG.API_BASE + '/api/auth/register', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -295,7 +295,7 @@ class AuthManager {
         try {
             this.setFormLoading('forgotPasswordForm', true);
             
-            const response = await fetch('/api/auth/forgot-password', {
+            const response = await fetch(window.YM7_CONFIG.API_BASE + '/api/auth/forgot-password', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
