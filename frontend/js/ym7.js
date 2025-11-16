@@ -1,761 +1,586 @@
 /**
- * YM7 Hobby - Main Application Logic
- * Handles window management, core functionality, and application state
+ * YM7 Hobby - Main Application Module
+ * Robust, production-ready application core with proper initialization
  */
 
-class YM7Application {
+class YM7App {
     constructor() {
-        this.currentUser = null;
         this.accessToken = null;
-        this.refreshToken = null;
+        this.refreshTokenValue = null; // renamed to avoid conflict with method
         this.ws = null;
         this.isConnected = false;
-        this.chatWindows = new Map();
-        this.buddies = [];
+        this.reconnectAttempts = 0;
+        this.initialized = false;
+
+        this.buddies = {};
         this.pendingRequests = [];
-        
-        // Application state
-        this.state = {
-            isAuthenticated: false,
-            status: 'online',
-            activeChats: new Set(),
-            notifications: []
+        this.unreadCount = 0;
+
+        this.status = "online";
+        this.statusTimer = null;
+
+        // Configuration with fallbacks
+        this.WS_BASE = window.YM7_CONFIG?.WS_BASE || 'wss://ym.betahobby.dpdns.org/ym7-ws';
+        this.API_BASE = window.YM7_CONFIG?.API_BASE || '/ym7-api';
+        this.STATIC_BASE = window.YM7_CONFIG?.STATIC_BASE || '/ym7';
+
+        // Status constants
+        this.STATUS = {
+            ONLINE: 'online',
+            AWAY: 'away',
+            OFFLINE: 'offline',
+            BUSY: 'busy'
         };
-        
-        this.initializeApp();
+
+        this.init();
     }
 
-    /**
-     * Initialize the application
-     */
+    /* -----------------------------------------------------
+       INITIALIZATION
+    ----------------------------------------------------- */
+    init() {
+        if (this.initialized) {
+            console.warn('YM7App already initialized');
+            return;
+        }
+
+        if (document.readyState === 'loading') {
+            document.addEventListener("DOMContentLoaded", () => {
+                this.initializeApp();
+            });
+        } else {
+            this.initializeApp();
+        }
+
+        window.addEventListener("blur", () => this.scheduleAwayStatus());
+        window.addEventListener("focus", () => this.setOnlineStatus());
+        
+        this.initialized = true;
+        console.log('YM7App initialized successfully');
+    }
+
     initializeApp() {
-        this.setupEventListeners();
-        this.checkExistingAuth();
-        this.setupWindowManagement();
-        this.setupNotifications();
-        
-        console.log('YM7 Hobby Application Initialized');
+        this.loadTokens();
+        this.setupGlobalEventListeners();
+        this.checkAuthenticationState();
+        this.initializeWebSocket();
+        this.initializeManagers();
     }
 
-    /**
-     * Setup global event listeners
-     */
-    setupEventListeners() {
-        // Window management
-        document.addEventListener('mousedown', this.handleWindowDragStart.bind(this));
-        document.addEventListener('mousemove', this.handleWindowDrag.bind(this));
-        document.addEventListener('mouseup', this.handleWindowDragEnd.bind(this));
-        
-        // Keyboard shortcuts
-        document.addEventListener('keydown', this.handleKeyboardShortcuts.bind(this));
-        
-        // Window focus management
-        window.addEventListener('focus', this.handleWindowFocus.bind(this));
-        window.addEventListener('blur', this.handleWindowBlur.bind(this));
+    setupGlobalEventListeners() {
+        // Global keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            // Ctrl/Cmd + F: Focus search
+            if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
+                e.preventDefault();
+                const searchInput = document.getElementById('buddySearch');
+                if (searchInput) searchInput.focus();
+            }
+            
+            // Esc: Close modals
+            if (e.key === 'Escape') {
+                this.closeAllModals();
+            }
+        });
     }
 
-    /**
-     * Check for existing authentication
-     */
-    checkExistingAuth() {
-        const savedToken = localStorage.getItem('ym7_access_token');
-        const savedUser = localStorage.getItem('ym7_user');
+    initializeManagers() {
+        // Initialize AuthManager if it exists
+        if (typeof AuthManager === 'function' && !window.authManager) {
+            window.authManager = new AuthManager(this);
+            console.log('AuthManager initialized');
+        }
         
-        if (savedToken && savedUser) {
+        // Other managers will be initialized by their respective modules
+    }
+
+    /* -----------------------------------------------------
+       AUTHENTICATION STATE MANAGEMENT
+    ----------------------------------------------------- */
+    checkAuthenticationState() {
+        if (this.accessToken) {
+            this.showMainInterface();
+        } else {
+            this.showLoginInterface();
+        }
+    }
+
+    showMainInterface() {
+        this.hideAllInterfaces();
+        const mainInterface = document.getElementById('mainInterface');
+        if (mainInterface) mainInterface.classList.remove('hidden');
+        
+        this.updateUserInfo();
+    }
+
+    showLoginInterface() {
+        this.hideAllInterfaces();
+        const loginWindow = document.getElementById('loginWindow');
+        if (loginWindow) loginWindow.classList.remove('hidden');
+    }
+
+    showRegisterInterface() {
+        this.hideAllInterfaces();
+        const registerWindow = document.getElementById('registerWindow');
+        if (registerWindow) registerWindow.classList.remove('hidden');
+    }
+
+    hideAllInterfaces() {
+        const interfaces = ['loginWindow', 'registerWindow', 'forgotPasswordWindow', 'mainInterface'];
+        interfaces.forEach(id => {
+            const element = document.getElementById(id);
+            if (element) element.classList.add('hidden');
+        });
+    }
+
+    updateUserInfo() {
+        if (this.currentUser) {
+            const userDisplayName = document.getElementById('userDisplayName');
+            if (userDisplayName) {
+                userDisplayName.textContent = this.currentUser.displayName || this.currentUser.email;
+            }
+        }
+    }
+
+    /* -----------------------------------------------------
+       TOKEN MANAGEMENT
+    ----------------------------------------------------- */
+    loadTokens() {
+        this.accessToken = localStorage.getItem("ym7_access_token");
+        this.refreshTokenValue = localStorage.getItem("ym7_refresh_token");
+        
+        const userData = localStorage.getItem("ym7_user");
+        if (userData) {
             try {
-                this.accessToken = savedToken;
-                this.currentUser = JSON.parse(savedUser);
-                this.state.isAuthenticated = true;
+                this.currentUser = JSON.parse(userData);
+            } catch (error) {
+                console.error('Error parsing user data:', error);
+                this.currentUser = null;
+            }
+        }
+    }
+
+    saveTokens(accessToken, refreshToken, user) {
+        this.accessToken = accessToken;
+        this.refreshTokenValue = refreshToken;
+        this.currentUser = user;
+
+        localStorage.setItem("ym7_access_token", accessToken);
+        localStorage.setItem("ym7_refresh_token", refreshToken);
+        localStorage.setItem("ym7_user", JSON.stringify(user));
+        
+        this.showMainInterface();
+    }
+
+    clearTokens() {
+        this.accessToken = null;
+        this.refreshTokenValue = null;
+        this.currentUser = null;
+
+        localStorage.removeItem("ym7_access_token");
+        localStorage.removeItem("ym7_refresh_token");
+        localStorage.removeItem("ym7_user");
+        
+        this.showLoginInterface();
+    }
+
+    async refreshAccessToken() {
+        if (!this.refreshTokenValue) {
+            console.warn("No refresh token available.");
+            return null;
+        }
+
+        try {
+            const response = await fetch(`${this.API_BASE}/api/auth/refresh`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ refreshToken: this.refreshTokenValue })
+            });
+
+            if (!response.ok) return null;
+
+            const data = await response.json();
+            if (data.accessToken) {
+                this.accessToken = data.accessToken;
+                localStorage.setItem("ym7_access_token", data.accessToken);
+                return data.accessToken;
+            }
+
+            return null;
+
+        } catch (err) {
+            console.error("Refresh token failed:", err);
+            return null;
+        }
+    }
+
+    /* -----------------------------------------------------
+       AUTHENTICATED FETCH
+    ----------------------------------------------------- */
+    async authenticatedFetch(url, options = {}) {
+        // Prepend API base path
+        if (url.startsWith('/api/')) {
+            url = this.API_BASE + url;
+        }
+
+        if (!options.headers) options.headers = {};
+        
+        if (this.accessToken) {
+            options.headers["Authorization"] = `Bearer ${this.accessToken}`;
+        }
+
+        if (!options.headers['Content-Type'] && !(options.body instanceof FormData)) {
+            options.headers['Content-Type'] = 'application/json';
+        }
+
+        try {
+            let response = await fetch(url, options);
+
+            // If token expired, try to refresh
+            if (response.status === 401) {
+                const newToken = await this.refreshAccessToken();
+                if (!newToken) {
+                    console.warn("Session expired - logging out");
+                    this.logout();
+                    return null;
+                }
+
+                // Retry with new token
+                options.headers["Authorization"] = `Bearer ${newToken}`;
+                response = await fetch(url, options);
+            }
+
+            return response;
+
+        } catch (error) {
+            console.error("Fetch failed:", error);
+            this.showNotification('Network error - please check your connection', 'error');
+            return null;
+        }
+    }
+
+    /* -----------------------------------------------------
+       WEBSOCKET MANAGEMENT
+    ----------------------------------------------------- */
+    initializeWebSocket() {
+        if (!this.accessToken) return;
+
+        if (!this.WS_BASE) {
+            console.error("WebSocket URL not configured");
+            return;
+        }
+
+        try {
+            const wsUrl = `${this.WS_BASE}?token=${encodeURIComponent(this.accessToken)}`;
+            this.ws = new WebSocket(wsUrl);
+
+            this.ws.onopen = () => {
+                this.isConnected = true;
+                this.reconnectAttempts = 0;
+                console.log('WebSocket connected');
                 
-                // Show main interface
-                this.showMainInterface();
-                
-                // Connect to WebSocket
-                this.connectWebSocket();
-                
-                // Load initial data
+                // Load initial data when connected
                 this.loadInitialData();
                 
-            } catch (error) {
-                console.error('Error restoring session:', error);
-                this.clearAuth();
-            }
+                this.showNotification('Connected successfully', 'success');
+            };
+
+            this.ws.onclose = (event) => {
+                this.isConnected = false;
+                console.log(`WebSocket disconnected: ${event.code} ${event.reason}`);
+                this.retryWebSocket();
+            };
+
+            this.ws.onerror = (error) => {
+                this.isConnected = false;
+                console.error('WebSocket error:', error);
+            };
+
+            this.ws.onmessage = (event) => {
+                this.handleIncomingMessage(event);
+            };
+
+        } catch (error) {
+            console.error('WebSocket initialization failed:', error);
         }
     }
 
-    /**
-     * Setup window management system
-     */
-    setupWindowManagement() {
-        this.draggedWindow = null;
-        this.dragOffset = { x: 0, y: 0 };
-        
-        // Z-index management
-        this.maxZIndex = 1000;
-    }
-
-    /**
-     * Setup notification system
-     */
-    setupNotifications() {
-        this.notificationId = 0;
-        this.notificationQueue = [];
-    }
-
-    /**
-     * Handle window drag start
-     */
-    handleWindowDragStart(e) {
-        const titleBar = e.target.closest('.ym7-title-bar');
-        if (!titleBar) return;
-        
-        const windowElement = titleBar.closest('.ym7-window, .chat-window');
-        if (!windowElement) return;
-        
-        this.draggedWindow = windowElement;
-        const rect = windowElement.getBoundingClientRect();
-        
-        this.dragOffset.x = e.clientX - rect.left;
-        this.dragOffset.y = e.clientY - rect.top;
-        
-        // Bring window to front
-        this.bringWindowToFront(windowElement);
-        
-        e.preventDefault();
-    }
-
-    /**
-     * Handle window dragging
-     */
-    handleWindowDrag(e) {
-        if (!this.draggedWindow) return;
-        
-        const x = e.clientX - this.dragOffset.x;
-        const y = e.clientY - this.dragOffset.y;
-        
-        // Constrain to viewport
-        const maxX = window.innerWidth - this.draggedWindow.offsetWidth;
-        const maxY = window.innerHeight - this.draggedWindow.offsetHeight;
-        
-        this.draggedWindow.style.left = Math.max(0, Math.min(x, maxX)) + 'px';
-        this.draggedWindow.style.top = Math.max(0, Math.min(y, maxY)) + 'px';
-    }
-
-    /**
-     * Handle window drag end
-     */
-    handleWindowDragEnd() {
-        this.draggedWindow = null;
-        this.dragOffset = { x: 0, y: 0 };
-    }
-
-    /**
-     * Bring window to front
-     */
-    bringWindowToFront(windowElement) {
-        this.maxZIndex++;
-        windowElement.style.zIndex = this.maxZIndex;
-    }
-
-    /**
-     * Handle keyboard shortcuts
-     */
-    handleKeyboardShortcuts(e) {
-        // Ctrl/Cmd + N: New chat
-        if ((e.ctrlKey || e.metaKey) && e.key === 'n') {
-            e.preventDefault();
-            this.showAddBuddyModal();
+    retryWebSocket() {
+        if (this.reconnectAttempts >= 10) {
+            console.error("Max reconnection attempts reached.");
+            return;
         }
-        
-        // Ctrl/Cmd + F: Search
-        if ((e.ctrlKey || e.metaKey) && e.key === 'f') {
-            e.preventDefault();
-            document.getElementById('buddySearch').focus();
-        }
-        
-        // Esc: Close modals
-        if (e.key === 'Escape') {
-            this.closeAllModals();
-        }
-    }
 
-    /**
-     * Handle window focus
-     */
-    handleWindowFocus() {
-        // Update status if was away
-        if (this.state.status === 'away') {
-            this.updateStatus('online');
-        }
-    }
-
-    /**
-     * Handle window blur
-     */
-    handleWindowBlur() {
-        // Set status to away after 5 minutes of inactivity
+        this.reconnectAttempts += 1;
+        const delay = Math.min(1000 * this.reconnectAttempts, 10000);
+        
+        console.log(`Attempting WebSocket reconnection in ${delay}ms (attempt ${this.reconnectAttempts})`);
+        
         setTimeout(() => {
-            if (!document.hasFocus() && this.state.status === 'online') {
-                this.updateStatus('away');
+            this.initializeWebSocket();
+        }, delay);
+    }
+
+    sendWS(data) {
+        if (this.ws && this.isConnected && this.ws.readyState === WebSocket.OPEN) {
+            try {
+                this.ws.send(JSON.stringify(data));
+                return true;
+            } catch (error) {
+                console.error('WebSocket send failed:', error);
+                return false;
             }
-        }, 300000); // 5 minutes
-    }
-
-    /**
-     * Show main application interface
-     */
-    showMainInterface() {
-        document.getElementById('loginWindow').classList.add('hidden');
-        document.getElementById('registerWindow').classList.add('hidden');
-        document.getElementById('forgotPasswordWindow').classList.add('hidden');
-        document.getElementById('mainInterface').classList.remove('hidden');
-        
-        // Update user info
-        if (this.currentUser) {
-            document.getElementById('userDisplayName').textContent = this.currentUser.displayName;
+        } else {
+            console.warn('WebSocket not connected, message not sent:', data);
+            return false;
         }
     }
 
-    /**
-     * Show login interface
-     */
-    showLoginInterface() {
-        document.getElementById('loginWindow').classList.remove('hidden');
-        document.getElementById('registerWindow').classList.add('hidden');
-        document.getElementById('forgotPasswordWindow').classList.add('hidden');
-        document.getElementById('mainInterface').classList.add('hidden');
-    }
-
-    /**
-     * Connect to WebSocket server
-     */
-    connectWebSocket() {
-        if (!this.accessToken) return;
-        
-       const wsUrl = window.YM7_CONFIG.WS_BASE;
-        this.ws = new WebSocket(wsUrl);
-        
-        this.ws.onopen = () => {
-            console.log('WebSocket connected');
-            this.isConnected = true;
-            
-            // Authenticate WebSocket
-            this.ws.send(JSON.stringify({
-                type: 'authenticate',
-                token: this.accessToken
-            }));
-            
-            this.hideLoading();
-        };
-        
-        this.ws.onmessage = (event) => {
-            this.handleWebSocketMessage(JSON.parse(event.data));
-        };
-        
-        this.ws.onclose = () => {
-            console.log('WebSocket disconnected');
-            this.isConnected = false;
-            
-            // Attempt reconnect after 5 seconds
-            setTimeout(() => {
-                if (this.state.isAuthenticated) {
-                    this.connectWebSocket();
-                }
-            }, 5000);
-        };
-        
-        this.ws.onerror = (error) => {
-            console.error('WebSocket error:', error);
-            this.showNotification('Connection error', 'error');
-        };
-    }
-
-    /**
-     * Handle WebSocket messages
-     */
-    handleWebSocketMessage(message) {
-        switch (message.type) {
-            case 'auth_success':
-                this.handleAuthSuccess(message);
-                break;
-                
-            case 'private_message':
-                this.handlePrivateMessage(message);
-                break;
-                
-            case 'buddy_status_change':
-                this.handleBuddyStatusChange(message);
-                break;
-                
-            case 'buddy_request':
-                this.handleBuddyRequest(message);
-                break;
-                
-            case 'typing_start':
-            case 'typing_stop':
-                this.handleTypingIndicator(message);
-                break;
-                
-            case 'message_read':
-                this.handleMessageRead(message);
-                break;
-                
-            case 'server_stats':
-                this.handleServerStats(message);
-                break;
-                
-            default:
-                console.log('Unknown WebSocket message:', message);
-        }
-    }
-
-    /**
-     * Handle authentication success
-     */
-    handleAuthSuccess(message) {
-        console.log('WebSocket authentication successful');
-        this.showNotification('Connected successfully', 'success');
-    }
-
-    /**
-     * Handle private message
-     */
-    handlePrivateMessage(message) {
-        if (window.chatManager) {
-            window.chatManager.handleIncomingMessage(message);
-        }
-    }
-
-    /**
-     * Handle buddy status change
-     */
-    handleBuddyStatusChange(message) {
-        if (window.buddiesManager) {
-            window.buddiesManager.updateBuddyStatus(message.userId, message.status);
-        }
-    }
-
-    /**
-     * Handle buddy request
-     */
-    handleBuddyRequest(message) {
-        if (window.buddiesManager) {
-            window.buddiesManager.handleIncomingRequest(message);
-        }
-    }
-
-    /**
-     * Handle typing indicator
-     */
-    handleTypingIndicator(message) {
-        if (window.chatManager) {
-            window.chatManager.handleTypingIndicator(message);
-        }
-    }
-
-    /**
-     * Handle message read receipt
-     */
-    handleMessageRead(message) {
-        if (window.chatManager) {
-            window.chatManager.handleMessageRead(message);
-        }
-    }
-
-    /**
-     * Handle server statistics
-     */
-    handleServerStats(message) {
-        // Could update UI with connection count, etc.
-        console.log('Server stats:', message);
-    }
-
-    /**
-     * Load initial application data
-     */
+    /* -----------------------------------------------------
+       INITIAL DATA LOADING
+    ----------------------------------------------------- */
     async loadInitialData() {
+        if (!this.accessToken) return;
+
         try {
-            this.showLoading('Loading your buddies...');
-            
-            // Load buddies
-            await this.loadBuddies();
-            
-            // Load pending requests
-            await this.loadPendingRequests();
-            
-            this.hideLoading();
-            
+            await Promise.all([
+                this.fetchBuddyList(),
+                this.fetchPendingRequests()
+            ]);
+            console.log('Initial data loaded successfully');
         } catch (error) {
             console.error('Error loading initial data:', error);
-            this.showNotification('Error loading data', 'error');
-            this.hideLoading();
         }
     }
 
-    /**
-     * Load user's buddies
-     */
-    async loadBuddies() {
-        try {
-            const response = await this.authenticatedFetch('/api/buddies');
-            if (response.ok) {
-                const data = await response.json();
-                this.buddies = data.buddies || [];
-                
-                // Update buddy list UI
-                if (window.buddiesManager) {
-                    window.buddiesManager.updateBuddyList(this.buddies);
-                }
-            }
-        } catch (error) {
-            console.error('Error loading buddies:', error);
-            throw error;
-        }
-    }
+    /* -----------------------------------------------------
+       API METHODS
+    ----------------------------------------------------- */
+    async fetchBuddyList() {
+        const res = await this.authenticatedFetch('/api/buddies');
+        if (!res || !res.ok) return;
 
-    /**
-     * Load pending buddy requests
-     */
-    async loadPendingRequests() {
-        try {
-            const response = await this.authenticatedFetch('/api/buddies/requests/pending');
-            if (response.ok) {
-                const data = await response.json();
-                this.pendingRequests = data.requests || [];
-                
-                // Update pending requests UI
-                if (window.buddiesManager) {
-                    window.buddiesManager.updatePendingRequests(this.pendingRequests);
-                }
-            }
-        } catch (error) {
-            console.error('Error loading pending requests:', error);
-            throw error;
-        }
-    }
-
-    /**
-     * Update user status
-     */
-    async updateStatus(newStatus) {
-        if (!this.state.isAuthenticated) return;
+        const data = await res.json();
+        this.buddies = data.buddies || [];
         
+        // Update UI if buddies manager exists
+        if (window.buddiesManager?.updateBuddyList) {
+            window.buddiesManager.updateBuddyList(this.buddies);
+        }
+    }
+
+    async fetchPendingRequests() {
+        const res = await this.authenticatedFetch('/api/buddies/requests/pending');
+        if (!res || !res.ok) return;
+
+        const data = await res.json();
+        this.pendingRequests = data.requests || [];
+        
+        // Update UI if buddies manager exists
+        if (window.buddiesManager?.updatePendingRequests) {
+            window.buddiesManager.updatePendingRequests(this.pendingRequests);
+        }
+    }
+
+    async updateStatus(status) {
+        if (!this.accessToken) return;
+
         try {
             const response = await this.authenticatedFetch('/api/auth/profile', {
                 method: 'PUT',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ status: newStatus })
+                body: JSON.stringify({ status })
             });
-            
+
             if (response.ok) {
-                this.state.status = newStatus;
-                
-                // Update status select
-                document.getElementById('statusSelect').value = newStatus;
+                this.status = status;
                 
                 // Send status update via WebSocket
-                if (this.ws && this.isConnected) {
-                    this.ws.send(JSON.stringify({
-                        type: 'status_update',
-                        status: newStatus
-                    }));
-                }
+                this.sendWS({ type: 'status_update', status });
+                
+                // Update status select if exists
+                const statusSelect = document.getElementById('statusSelect');
+                if (statusSelect) statusSelect.value = status;
             }
         } catch (error) {
             console.error('Error updating status:', error);
         }
     }
 
-    /**
-     * Show loading overlay
-     */
-    showLoading(message = 'Loading...') {
-        const overlay = document.getElementById('loadingOverlay');
-        const text = overlay.querySelector('.ym7-loading-text');
-        
-        text.textContent = message;
-        overlay.classList.remove('hidden');
+    /* -----------------------------------------------------
+       STATUS MANAGEMENT
+    ----------------------------------------------------- */
+    scheduleAwayStatus() {
+        clearTimeout(this.statusTimer);
+        this.statusTimer = setTimeout(() => {
+            this.updateStatus(this.STATUS.AWAY);
+        }, 300000); // 5 minutes
     }
 
-    /**
-     * Hide loading overlay
-     */
-    hideLoading() {
-        document.getElementById('loadingOverlay').classList.add('hidden');
+    setOnlineStatus() {
+        clearTimeout(this.statusTimer);
+        this.updateStatus(this.STATUS.ONLINE);
     }
 
-    /**
-     * Show notification
-     */
-    showNotification(message, type = 'info', duration = 5000) {
-        const container = document.getElementById('notificationContainer');
-        const notification = document.createElement('div');
-        notification.className = `ym7-notification ${type}`;
-        notification.id = `notification-${++this.notificationId}`;
-        
-        notification.innerHTML = `
-            <div class="ym7-notification-header">
-                <span>${type.charAt(0).toUpperCase() + type.slice(1)}</span>
-                <button class="ym7-notification-close" onclick="app.closeNotification('${notification.id}')">×</button>
-            </div>
-            <div class="ym7-notification-body">${message}</div>
-        `;
-        
-        container.appendChild(notification);
-        
-        // Auto remove after duration
-        if (duration > 0) {
-            setTimeout(() => {
-                this.closeNotification(notification.id);
-            }, duration);
+    /* -----------------------------------------------------
+       MESSAGE HANDLING
+    ----------------------------------------------------- */
+    handleIncomingMessage(event) {
+        let msg;
+        try {
+            msg = JSON.parse(event.data);
+        } catch (error) {
+            console.error('Error parsing WebSocket message:', error);
+            return;
         }
-        
-        return notification.id;
-    }
 
-    /**
-     * Close notification
-     */
-    closeNotification(id) {
-        const notification = document.getElementById(id);
-        if (notification) {
-            notification.style.animation = 'slideInRight 0.3s ease-out reverse';
-            setTimeout(() => {
-                if (notification.parentNode) {
-                    notification.parentNode.removeChild(notification);
+        if (!msg.type) {
+            console.warn('WebSocket message missing type:', msg);
+            return;
+        }
+
+        switch (msg.type) {
+            case 'auth_success':
+                console.log('WebSocket authentication successful');
+                break;
+
+            case 'private_message':
+                if (window.chatManager?.handleIncomingMessage) {
+                    window.chatManager.handleIncomingMessage(msg);
                 }
-            }, 300);
+                break;
+
+            case 'buddy_status_change':
+                if (window.buddiesManager?.updateBuddyStatus) {
+                    window.buddiesManager.updateBuddyStatus(msg.userId, msg.status);
+                }
+                break;
+
+            case 'buddy_request':
+                if (window.buddiesManager?.handleIncomingRequest) {
+                    window.buddiesManager.handleIncomingRequest(msg);
+                }
+                break;
+
+            case 'typing_start':
+            case 'typing_stop':
+                if (window.chatManager?.handleTypingIndicator) {
+                    window.chatManager.handleTypingIndicator(msg);
+                }
+                break;
+
+            case 'message_read':
+                if (window.chatManager?.handleMessageRead) {
+                    window.chatManager.handleMessageRead(msg);
+                }
+                break;
+
+            case 'notification':
+                this.showNotification(msg.message, msg.level || 'info');
+                break;
+
+            default:
+                console.log('Unknown WebSocket message type:', msg.type, msg);
         }
     }
 
-    /**
-     * Show add buddy modal
-     */
-    showAddBuddyModal() {
-        this.showModal('addBuddyModal');
-    }
+    /* -----------------------------------------------------
+       NOTIFICATION SYSTEM
+    ----------------------------------------------------- */
+    showNotification(message, type = 'info', duration = 5000) {
+        // Use existing notification system if available
+        if (window.authManager?.showAuthStatus) {
+            window.authManager.showAuthStatus(message, type);
+            return;
+        }
 
-    /**
-     * Show modal
-     */
-    showModal(modalId) {
-        const modal = document.getElementById(modalId);
-        if (modal) {
-            modal.classList.remove('hidden');
-            this.bringWindowToFront(modal);
+        // Fallback notification
+        console.log(`[${type.toUpperCase()}] ${message}`);
+        
+        // Simple browser notification as fallback
+        if (type === 'error' || type === 'success') {
+            alert(`${type.toUpperCase()}: ${message}`);
         }
     }
 
-    /**
-     * Close modal
-     */
-    closeModal(modalId) {
-        const modal = document.getElementById(modalId);
-        if (modal) {
-            modal.classList.add('hidden');
-        }
-    }
-
-    /**
-     * Close all modals
-     */
+    /* -----------------------------------------------------
+       MODAL MANAGEMENT
+    ----------------------------------------------------- */
     closeAllModals() {
         const modals = document.querySelectorAll('.ym7-modal');
-        modals.forEach(modal => modal.classList.add('hidden'));
+        modals.forEach(modal => {
+            modal.classList.add('hidden');
+        });
     }
 
-    /**
-     * Minimize window
-     */
-    minimizeWindow(windowId) {
-        const window = document.getElementById(windowId);
-        if (window) {
-            window.classList.toggle('minimized');
-        }
-    }
-
-    /**
-     * Close window
-     */
-    closeWindow(windowId) {
-        const window = document.getElementById(windowId);
-        if (window) {
-            window.classList.add('hidden');
-        }
-    }
-
-    /**
-     * Logout user
-     */
+    /* -----------------------------------------------------
+       LOGOUT
+    ----------------------------------------------------- */
     async logout() {
         try {
+            // Close WebSocket
             if (this.ws) {
                 this.ws.close();
+                this.ws = null;
             }
-            
+
             // Call logout endpoint
-            await fetch('/api/auth/logout', {
-                method: 'POST',
-                headers: {
-                    'Authorization': `Bearer ${this.accessToken}`
-                }
+            await this.authenticatedFetch('/api/auth/logout', {
+                method: 'POST'
             });
-            
+
         } catch (error) {
             console.error('Logout error:', error);
         } finally {
-            this.clearAuth();
-            this.showLoginInterface();
+            this.clearTokens();
+            this.showNotification('Logged out successfully', 'success');
         }
-    }
-
-    /**
-     * Clear authentication data
-     */
-    clearAuth() {
-        this.currentUser = null;
-        this.accessToken = null;
-        this.refreshToken = null;
-        this.state.isAuthenticated = false;
-        
-        localStorage.removeItem('ym7_access_token');
-        localStorage.removeItem('ym7_user');
-        localStorage.removeItem('ym7_refresh_token');
-        
-        // Close all chat windows
-        this.chatWindows.forEach((window, buddyId) => {
-            this.closeChatWindow(buddyId);
-        });
-        this.chatWindows.clear();
-    }
-
-    /**
-     * Save authentication data
-     */
-    saveAuth(accessToken, refreshToken, user) {
-        this.accessToken = accessToken;
-        this.refreshToken = refreshToken;
-        this.currentUser = user;
-        this.state.isAuthenticated = true;
-        
-        localStorage.setItem('ym7_access_token', accessToken);
-        localStorage.setItem('ym7_refresh_token', refreshToken);
-        localStorage.setItem('ym7_user', JSON.stringify(user));
-    }
-
-    /**
-     * Refresh access token
-     */
-    async refreshToken() {
-        try {
-            const response = await fetch('/api/auth/refresh', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    refreshToken: this.refreshToken
-                })
-            });
-            
-            if (response.ok) {
-                const data = await response.json();
-                this.accessToken = data.accessToken;
-                localStorage.setItem('ym7_access_token', data.accessToken);
-                return true;
-            }
-        } catch (error) {
-            console.error('Token refresh failed:', error);
-        }
-        
-        return false;
-    }
-
-    /**
-     * Make authenticated API request with token refresh
-     */
-            async authenticatedFetch(url, options = {}) {
-            // Prepend API base path using config
-            if (url.startsWith('/api/')) {
-                url = window.YM7_CONFIG.API_BASE + url;
-            }
-            
-            if (!options.headers) {
-                options.headers = {};
-            }
-            
-            options.headers['Authorization'] = `Bearer ${this.accessToken}`;
-
-        
-        let response = await fetch(url, options);
-        
-        // If token expired, try to refresh
-        if (response.status === 401) {
-            const refreshed = await this.refreshToken();
-            if (refreshed) {
-                options.headers['Authorization'] = `Bearer ${this.accessToken}`;
-                response = await fetch(url, options);
-            } else {
-                this.logout();
-                throw new Error('Authentication failed');
-            }
-        }
-        
-        return response;
     }
 }
 
-// Global application instance
-let app;
+/* -----------------------------------------------------
+   GLOBAL INSTANCE & SAFE INITIALIZATION
+----------------------------------------------------- */
 
-/**
- * Initialize application when DOM is loaded
- */
-function initializeApp() {
-    app = new YM7Application();
-}
-
-/**
- * Auto-initialize app - works even if DOMContentLoaded already fired
- */
-if (document.readyState === 'loading') {
-    // DOM still loading, wait for DOMContentLoaded
-    document.addEventListener('DOMContentLoaded', initializeApp);
+// Safe global instance creation
+if (!window.app) {
+    window.app = new YM7App();
 } else {
-    // DOM already loaded, initialize immediately
-    initializeApp();
+    console.warn('YM7App instance already exists');
 }
 
-/**
- * Global functions for HTML event handlers
- */
+/* -----------------------------------------------------
+   SAFE WINDOW HELPER FUNCTIONS
+   These won't break if called before managers are initialized
+----------------------------------------------------- */
+
 function minimizeWindow(windowId) {
-    if (app) app.minimizeWindow(windowId);
+    // Implementation would depend on window management system
+    console.log('Minimize window:', windowId);
 }
 
 function closeWindow(windowId) {
-    if (app) app.closeWindow(windowId);
+    // Implementation would depend on window management system
+    console.log('Close window:', windowId);
 }
 
 function logout() {
-    if (app) app.logout();
+    if (window.app?.logout) {
+        window.app.logout();
+    } else {
+        console.warn('App not initialized for logout');
+    }
 }
 
-function showContactsMenu() {
-    // Implementation for contacts menu
-    console.log('Contacts menu clicked');
+function minimizeChat(buddyId) {
+    window.chatManager?.minimizeChat?.(buddyId);
 }
 
-function showActionsMenu() {
-    // Implementation for actions menu
-    console.log('Actions menu clicked');
+function closeChat(buddyId) {
+    window.chatManager?.closeChat?.(buddyId);
 }
 
-function showHelpMenu() {
-    // Implementation for help menu
-    console.log('Help menu clicked');
+function sendMessage(buddyId) {
+    window.chatManager?.sendMessage?.(buddyId);
 }
 
 function toggleGroup(groupId) {
@@ -766,11 +591,10 @@ function toggleGroup(groupId) {
 }
 
 function closeModal(modalId) {
-    if (app) app.closeModal(modalId);
-}
-
-function sendBuddyRequest() {
-    if (window.buddiesManager) {
-        window.buddiesManager.sendBuddyRequest();
+    const modal = document.getElementById(modalId);
+    if (modal) {
+        modal.classList.add('hidden');
     }
 }
+
+console.log('YM7 Hobby Core Module loaded successfully');
