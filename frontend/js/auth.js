@@ -464,7 +464,7 @@ class AuthManager {
      */
     async verifyEmail(token) {
         try {
-            const response = await fetch('/api/verify-email', {
+            const response = await fetch(window.YM7_CONFIG.API_BASE + '/api/verify-email', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -492,7 +492,7 @@ class AuthManager {
      */
     async resetPassword(token, newPassword) {
         try {
-            const response = await fetch('/api/auth/reset-password', {
+            const response = await fetch(window.YM7_CONFIG.API_BASE + '/api/auth/reset-password', {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
