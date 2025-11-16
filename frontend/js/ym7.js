@@ -598,3 +598,26 @@ function closeModal(modalId) {
 }
 
 console.log('YM7 Hobby Core Module loaded successfully');
+
+/* -----------------------------------------------------
+   LEGACY SUPPORT FOR HTML INITIALIZATION
+   Keep this for backward compatibility with HTML event listeners
+----------------------------------------------------- */
+
+/**
+ * Legacy initializeApp function for HTML event listeners
+ * This ensures compatibility with existing HTML onload attributes
+ */
+function initializeApp() {
+    console.log('Legacy initializeApp called - using modern YM7App');
+    // The modern app is already initialized automatically
+    // This function exists only for backward compatibility
+}
+
+/**
+ * Auto-initialize for legacy support
+ * This ensures the app works with both old and new initialization methods
+ */
+if (typeof YM7App === 'function' && !window.app) {
+    window.app = new YM7App();
+}
