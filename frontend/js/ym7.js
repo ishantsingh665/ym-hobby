@@ -718,6 +718,17 @@ function initializeApp() {
 }
 
 /**
+ * Auto-initialize app - works even if DOMContentLoaded already fired
+ */
+if (document.readyState === 'loading') {
+    // DOM still loading, wait for DOMContentLoaded
+    document.addEventListener('DOMContentLoaded', initializeApp);
+} else {
+    // DOM already loaded, initialize immediately
+    initializeApp();
+}
+
+/**
  * Global functions for HTML event handlers
  */
 function minimizeWindow(windowId) {
