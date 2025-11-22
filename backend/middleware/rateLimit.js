@@ -2,72 +2,101 @@ const rateLimit = require('express-rate-limit');
 const slowDown = require('express-slow-down');
 
 /**
- * Rate limiting middleware for YM7 Hobby
- * Protects against brute force and DDoS attacks
+ * YM7 Hobby – Global Rate Limiting Middleware
+ * Protects authentication, API, verification, password resets and WebSocket events
  */
 
-// Authentication rate limiting
+/* ----------------------------------------------------
+   AUTHENTICATION RATE LIMITER
+   (Login, register, token operations)
+----------------------------------------------------- */
 const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 5, // Limit each IP to 5 requests per windowMs
+    max: 5,
+    skipSuccessfulRequests: true,
     message: {
         error: 'Too many authentication attempts',
         code: 'RATE_LIMIT_EXCEEDED',
         message: 'Please try again after 15 minutes'
     },
     standardHeaders: true,
-    legacyHeaders: false,
-    skipSuccessfulRequests: true, // Don't count successful logins
+    legacyHeaders: false
 });
 
-// General API rate limiting
+/* ----------------------------------------------------
+   GENERAL API RATE LIMITER
+----------------------------------------------------- */
 const apiLimiter = rateLimit({
-    windowMs: 1 * 60 * 1000, // 1 minute
-    max: 100, // Limit each IP to 100 requests per minute
+    windowMs: 60 * 1000, // 1 minute
+    max: 100,
     message: {
         error: 'Too many requests',
         code: 'RATE_LIMIT_EXCEEDED',
         message: 'Please slow down your requests'
     },
     standardHeaders: true,
-    legacyHeaders: false,
+    legacyHeaders: false
 });
 
-// Strict rate limiting for sensitive operations
+/* ----------------------------------------------------
+   STRICT LIMITER (Sensitive endpoints)
+----------------------------------------------------- */
 const strictLimiter = rateLimit({
-    windowMs: 1 * 60 * 1000, // 1 minute
-    max: 10, // Limit each IP to 10 requests per minute
+    windowMs: 60 * 1000,
+    max: 10,
     message: {
         error: 'Too many requests',
         code: 'RATE_LIMIT_EXCEEDED',
         message: 'Please wait before trying again'
     },
     standardHeaders: true,
-    legacyHeaders: false,
+    legacyHeaders: false
 });
 
-// Password reset rate limiting
+/* ----------------------------------------------------
+   PASSWORD RESET LIMITER
+----------------------------------------------------- */
 const passwordResetLimiter = rateLimit({
     windowMs: 60 * 60 * 1000, // 1 hour
-    max: 3, // Limit each IP to 3 password reset requests per hour
+    max: 3,
     message: {
         error: 'Too many password reset attempts',
         code: 'RATE_LIMIT_EXCEEDED',
         message: 'Please try again after 1 hour'
     },
     standardHeaders: true,
-    legacyHeaders: false,
+    legacyHeaders: false
 });
 
-// Speed limiting (gradual slowing down)
+/* ----------------------------------------------------
+   EMAIL VERIFICATION LIMITER
+   (Your missing limiter that caused crash)
+----------------------------------------------------- */
+const verifyLimiter = rateLimit({
+    windowMs: 5 * 60 * 1000, // 5 minutes
+    max: 10,
+    message: {
+        error: 'Too many verification attempts',
+        code: 'VERIFY_RATE_LIMIT',
+        message: 'Please try again later'
+    },
+    standardHeaders: true,
+    legacyHeaders: false
+});
+
+/* ----------------------------------------------------
+   SPEED LIMITER (Gradual slowdown)
+----------------------------------------------------- */
 const speedLimiter = slowDown({
-    windowMs: 1 * 60 * 1000, // 1 minute
-    delayAfter: 50, // Allow 50 requests at full speed
-    delayMs: 100, // Add 100ms delay per request after 50
-    maxDelayMs: 2000, // Maximum 2 second delay
+    windowMs: 60 * 1000,
+    delayAfter: 50,
+    delayMs: 100,
+    maxDelayMs: 2000
 });
 
-// WebSocket message rate limiting storage
+/* ----------------------------------------------------
+   WEBSOCKET RATE LIMITER (Custom)
+----------------------------------------------------- */
 const wsRateLimits = new Map();
 
 const checkWebSocketRateLimit = (ip, type, max, windowMs) => {
@@ -77,10 +106,10 @@ const checkWebSocketRateLimit = (ip, type, max, windowMs) => {
 
     let requests = wsRateLimits.get(key) || [];
 
-    // Remove old requests outside the window
-    requests = requests.filter(time => time > windowStart);
+    // Remove old requests
+    requests = requests.filter(t => t > windowStart);
 
-    // Check if under limit
+    // Check limit
     if (requests.length >= max) {
         return false;
     }
@@ -92,26 +121,27 @@ const checkWebSocketRateLimit = (ip, type, max, windowMs) => {
     return true;
 };
 
-// Clean up old rate limit data
+// Automatic cleanup every 30 minutes
 setInterval(() => {
     const now = Date.now();
     const oneHourAgo = now - (60 * 60 * 1000);
-    
-    for (const [key, requests] of wsRateLimits.entries()) {
-        const recentRequests = requests.filter(time => time > oneHourAgo);
-        if (recentRequests.length === 0) {
-            wsRateLimits.delete(key);
-        } else {
-            wsRateLimits.set(key, recentRequests);
-        }
-    }
-}, 30 * 60 * 1000); // Clean every 30 minutes
 
+    for (const [key, requests] of wsRateLimits.entries()) {
+        const remaining = requests.filter(t => t > oneHourAgo);
+        if (remaining.length === 0) wsRateLimits.delete(key);
+        else wsRateLimits.set(key, remaining);
+    }
+}, 30 * 60 * 1000);
+
+/* ----------------------------------------------------
+   EXPORT ALL LIMITERS
+----------------------------------------------------- */
 module.exports = {
     authLimiter,
     apiLimiter,
     strictLimiter,
     passwordResetLimiter,
+    verifyLimiter,        // REQUIRED by verification.js
     speedLimiter,
     checkWebSocketRateLimit,
     wsRateLimits
