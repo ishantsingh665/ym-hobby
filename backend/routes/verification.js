@@ -147,14 +147,16 @@ router.post('/resend-verification',
                 });
             }
 
-            // In a real implementation, you would:
-            // 1. Check if user exists and is not verified
-            // 2. Generate new verification token
-            // 3. Send verification email
+            // FIXED: Call the actual auth method
+            const result = await auth.resendVerificationEmail(email);
+
+            if (result.error) {
+                return res.status(400).json(result);
+            }
 
             res.json({
                 success: true,
-                message: 'If the email exists and is not verified, a new verification email has been sent'
+                message: 'Verification email sent successfully'
             });
 
         } catch (error) {
