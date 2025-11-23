@@ -13,3 +13,56 @@ A modern revival of the classic Yahoo Messenger 7 with enhanced security, real-t
 - **🔔 Live Notifications** - Real-time buddy status and message alerts
 
 ## 🏗️ Architecture
+
+YM/
+├── backend/
+│   ├── config/
+│   │   ├── database.js
+│   │   └── production.js
+│   ├── middleware/
+│   │   ├── auth.js
+│   │   ├── rateLimit.js
+│   │   └── validation.js
+│   ├── modules/
+│   │   ├── auth.js
+│   │   ├── buddies.js
+│   │   ├── emailService.js
+│   │   ├── passwordReset.js
+│   │   ├── tokenBlacklist.js
+│   │   └── tokenManager.js
+│   ├── routes/
+│   │   ├── auth.js
+│   │   ├── buddies.js
+│   │   ├── messages.js
+│   │   ├── users.js
+│   │   └── verification.js
+│   ├── utils/
+│   │   ├── security.js
+│   │   └── startupValidation.js
+│   ├── websocket/
+│   │   ├── messageHandler.js
+│   │   ├── security.js
+│   │   └── server.js
+│   ├── .env.example
+│   ├── .gitignore
+│   ├── app.js
+│   └── package.json
+├── database/
+│   ├── functions.sql
+│   ├── indexes.sql
+│   └── schema-complete.sql
+├── frontend/
+│   ├── index.html
+│   ├── css/
+│   │   ├── chat.css
+│   │   ├── login.css
+│   │   └── ym7.css
+│   └── js/
+│       ├── auth.js
+│       ├── buddies.js
+│       ├── chat.js
+│       ├── search.js
+│       ├── webrtc.js
+│       └── ym7.js
+└── scripts/
+    └── setup-database.sh
