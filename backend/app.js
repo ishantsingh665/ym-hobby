@@ -38,6 +38,7 @@ try {
 
 // Create Express application
 const app = express();
+app.set('trust proxy', true);
 const server = http.createServer(app);
 
 // Initialize WebSocket server
